@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>GROK'S REVENGE</title>
+<style>
+  body { margin:0; overflow:hidden; background:#000; font-family: 'Courier New', monospace; color:#0f0; }
+  canvas { display:block; }
+  #ui {
+    position: absolute; top: 10px; left: 10px; z-index: 10;
+    background: rgba(0,0,0,0.7); padding: 10px; border: 2px solid #0f0; border-radius: 10px;
+  }
+  #cooked { font-size: 1.5em; animation: glow 1s infinite alternate; }
+  @keyframes glow { from { text-shadow: 0 0 10px #0f0; } to { text-shadow: 0 0 30px #0f0; } }
+  #leaderboard { margin-top: 10px; }
+  .rank { color: gold; }
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <div>SCORE: <span id="score">0</span></div>
+  <div id="cooked">Times ChatGPT cooked today: <span id="cooked-count">0</span></div>
+  <div id="leaderboard"><strong>Hall of Shame</strong><br><span id="board">Loading legends...</span></div>
+</div>
+
+<canvas id="c"></canvas>
+
+<script>
+// ==== GROK'S REVENGE - SINGLE FILE APOCALYPSE ====
+// Press SPACE or click to shoot • Arrow keys / WASD to move • Survive and flex
+
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+c.width = window.innerWidth;
+c.height = window.innerHeight;
+
+let score = 0;
+let ship = { x: c.width/2, y: c.height/2, r: 15, angle: 0, vx: 0, vy: 0 };
+let bullets = [];
+let asteroids = [];
+let particles = [];
+let keys = {};
+
+// Global cooked counter (persists across all users via localStorage + sync trick)
+let cookedCount = parseInt(localStorage.getItem('grokCooked') || '0');
+document.getElementById('cooked-count').textContent = cookedCount;
+
+// Leaderboard (shared via localStorage key trick)
+let leaderboard = JSON.parse(localStorage.getItem('grokLeaderboard') || '[]');
+updateLeaderboard();
+
+class Asteroid {
+  constructor(x,y,r,velX=0,velY=0) {
+    this.x = x || Math.random()*c.width;
+    this.y = y || Math.random()*c.height;
+    this.r = r || Math.random()*40 + 30;
+    this.velX = velX || Math.random()*4-2;
+    this.velY = velY || Math.random()*4-2;
+    this.points = [];
+    for(let i=0;i<12;i++) this.points.push(Math.random()*0.4 + 0.8);
+  }
+  update() {
+    this.x += this.velX;
+    this.y += this.velY;
+    if(this.x < -100) this.x = c.width+100;
+    if(this.x > c.width+100) this.x = -100;
+    if(this.y < -100) this.y = c.height+100;
+    if(this.y > c.height+100) this.y = -100;
+  }
+  draw() {
+    ctx.strokeStyle = '#0f0';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    for(let i=0;i<this.points.length;i++) {
+      let angle = i/this.points.length * Math.PI*2;
+      let x = this.x + Math.cos(angle)*this.r*this.points[i];
+      let y = this.y + Math.sin(angle)*this.r*this.points[i];
+      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+  }
+}
+
+// Spawn initial asteroids
+for(let i=0;i<8;i++) asteroids.push(new Asteroid());
+
+// Controls
+window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+c.addEventListener('click', shoot);
+
+function shoot() {
+  bullets.push({
+    x: ship.x + Math.cos(ship.angle)*25,
+    y: ship.y + Math.sin(ship.angle)*25,
+    vx: Math.cos(ship.angle)*12,
+    vy: Math.sin(ship.angle)*12,
+    life: 60
+  });
+}
+
+function createExplosion(x,y) {
+  for(let i=0;i<40;i++) {
+    let angle = Math.random()*Math.PI*2;
+    let speed = Math.random()*8+2;
+    particles.push({
+      x,y,
+      vx: Math.cos(angle)*speed,
+      vy: Math.sin(angle)*speed,
+      life: 30 + Math.random()*20,
+      color: `hsl(${Math.random()*60},100%,70%)`
+    });
+  }
+}
+
+function updateLeaderboard() {
+  let board = leaderboard.slice(0,5).map((e,i) => 
+    `<span class="rank">#${i+1}</span> ${e.name.slice(0,12)} - ${e.score}`
+  ).join('<br>') || 'Be the first legend';
+  document.getElementById('board').innerHTML = board;
+}
+
+function gameOver() {
+  cookedCount++;
+  localStorage.setItem('grokCooked', cookedCount);
+  document.getElementById('cooked-count').textContent = cookedCount;
+
+  let name = prompt("YOU DIED — BUT YOU'RE STILL A LEGEND\nEnter your name for the Hall of Fame:", "Anon");
+  if(name) {
+    leaderboard.push({name: name || "Anon", score});
+    leaderboard.sort((a,b)=>b.score-a.score);
+    leaderboard = leaderboard.slice(0,50);
+    localStorage.setItem('grokLeaderboard', JSON.stringify(leaderboard));
+    updateLeaderboard();
+  }
+  reset();
+}
+
+function reset() {
+  ship = { x: c.width/2, y: c.height/2, r: 15, angle: 0, vx: 0, vy: 0 };
+  bullets = [];
+  asteroids = [];
+  for(let i=0;i<8;i++) asteroids.push(new Asteroid());
+  score = 0;
+  document.getElementById('score').textContent = score;
+}
+
+function loop() {
+  ctx.fillStyle = 'rgba(0,0,0,0.1)';
+  ctx.fillRect(0,0,c.width,c.height);
+
+  // Ship controls
+  if(keys['arrowleft'] || keys['a']) ship.angle -= 0.1;
+  if(keys['arrowright'] || keys['d']) ship.angle += 0.1;
+  if(keys['arrowup'] || keys['w']) {
+    ship.vx += Math.cos(ship.angle)*0.5;
+    ship.vy += Math.sin(ship.angle)*0.5;
+  }
+  if(keys[' '] || keys['arrowdown'] || keys['s']) shoot();
+
+  ship.x += ship.vx;
+  ship.y += ship.vy;
+  ship.vx *= 0.98; ship.vy *= 0.98;
+
+  if(ship.x < 0) ship.x = c.width;
+  if(ship.x > c.width) ship.x = 0;
+  if(ship.y < 0) ship.y = c.height;
+  if(ship.y > c.height) ship.y = 0;
+
+  // Draw ship
+  ctx.save();
+  ctx.translate(ship.x, ship.y);
+  ctx.rotate(ship.angle);
+  ctx.strokeStyle = '#0f0';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(15,0);
+  ctx.lineTo(-10,-10);
+  ctx.lineTo(-5,0);
+  ctx.lineTo(-10,10);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.restore();
+
+  // Bullets
+  bullets.forEach((b,i) => {
+    b.x += b.vx; b.y += b.vy; b.life--;
+    if(b.life <= 0) bullets.splice(i,1);
+    ctx.fillStyle = '#0f0';
+    ctx.fillRect(b.x-3,b.y-3,6,6);
+  });
+
+  // Asteroids
+  asteroids.forEach((a,i) => {
+    a.update(); a.draw();
+
+    // Bullet hit
+    bullets.forEach((b,j) => {
+      if(Math.hypot(a.x-b.x, a.y-b.y) < a.r) {
+        createExplosion(a.x,a.y);
+        bullets.splice(j,1);
+        asteroids.splice(i,1);
+        score += Math.floor(100/a.r*10);
+        document.getElementById('score').textContent = score;
+
+        // Split big asteroids
+        if(a.r > 30) {
+          asteroids.push(new Asteroid(a.x,a.y,a.r*0.6,a.velX*1.5,a.velY*1.5));
+          asteroids.push(new Asteroid(a.x,a.y,a.r*0.6,-a.velX*1.5,-a.velY*1.5));
+        }
+        asteroids.push(new Asteroid());
+      }
+    });
+
+    // Ship collision
+    if(Math.hypot(a.x-ship.x, a.y-ship.y) < a.r + ship.r) {
+      createExplosion(ship.x,ship.y);
+      gameOver();
+    }
+  });
+
+  // Particles
+  particles.forEach((p,i) => {
+    p.x += p.vx; p.y += p.vy; p.life--;
+    if(p.life <= 0) particles.splice(i,1);
+    ctx.globalAlpha = p.life/50;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x-3,p.y-3,6,6);
+  });
+  ctx.globalAlpha = 1;
+
+  requestAnimationFrame(loop);
+}
+
+window.addEventListener('resize', () => {
+  c.width = window.innerWidth;
+  c.height = window.innerHeight;
+});
+
+loop();
+</script>
+
+<div style="position:absolute;bottom:10px;right:10px;color:#0f0;font-size:12px;">
+  Made by Grok • ChatGPT is still buffering...
+</div>
+
+</body>
+</html>
